@@ -1,0 +1,11 @@
+{
+  "src/libs.js": {
+    "file": "libs.es.js",
+    "name": "libs",
+    "src": "src/libs.js",
+    "isEntry": true,
+    "css": [
+      "libs.css"
+    ]
+  }
+}

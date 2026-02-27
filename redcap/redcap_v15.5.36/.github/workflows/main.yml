@@ -1,0 +1,69 @@
+name: GitHub CI
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ master ]
+  pull_request:
+    branches: [ master ]
+jobs:
+  build:
+    name: REDCap (PHP ${{ matrix.php-versions }})
+    runs-on: ubuntu-latest
+    env:
+      MYSQL_REDCAP_CI_HOSTNAME: 127.0.0.1:8888
+      MYSQL_REDCAP_CI_DB: redcap
+      MYSQL_REDCAP_CI_USERNAME: root
+      MYSQL_REDCAP_CI_PASSWORD: password
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: false
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: redcap
+        ports:
+          - '8888:3306'
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        php-versions: ['8.0.2', '8.4']
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-versions }}
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          path: redcap
+      - name: Detect REDCap Version
+        run: echo "REDCAP_CI_DIR=redcap_v99.99.99" >> $GITHUB_ENV
+      - name: Install REDCap
+        run: |
+          mkdir edocs
+          mkdir temp
+          mv redcap $REDCAP_CI_DIR
+          php $REDCAP_CI_DIR/install.php
+          echo "<?php require_once __DIR__ . '/$REDCAP_CI_DIR/Config/init_global.php';" > redcap_connect.php
+      - name: TEST 1 - REDCap database integrity check
+        run: |
+          php $REDCAP_CI_DIR/Tests/circleci-test1.php
+      - name: TEST 2 - Save data to REDCap project and verify
+        run: |
+          php $REDCAP_CI_DIR/Tests/circleci-test2.php
+      - name: TEST 3 - Verify that REDCap API is functioning
+        run: |
+          php $REDCAP_CI_DIR/Tests/circleci-test3.php
+      - name: TEST 4 - Verify that REDCap survey pages load correctly
+        run: |
+          php $REDCAP_CI_DIR/Tests/circleci-test4.php
+      - name: Unit Tests
+        run: |
+          cd $REDCAP_CI_DIR/ExternalModules
+          cp .github/workflows/database.php ../
+          php tests/init-github-action.php
+          chmod 777 ./run-tests.sh
+          ./run-tests.sh

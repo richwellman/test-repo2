@@ -1,0 +1,16 @@
+/.vscode
+/.idea
+.DS_Store
+node_modules
+yarn.lock
+/Resources/webpack/yarn.lock
+/Resources/webpack/yarn-error.log
+/Libraries/phpqrcode/errors.txt
+/package-lock.json
+/.phpunit.result.cache
+/UnitTests/vendor/phpunit/phpunit/.phpunit.result.cache
+/Libraries/phpqrcode/-errors.txt
+/Libraries/phpqrcode/*-errors.txt
+.phpunit.result.cache
+.yalc
+yalc.lock

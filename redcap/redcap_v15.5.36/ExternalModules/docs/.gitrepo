@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:vanderbilt-redcap/external-module-framework-docs.git
+	branch = main
+	commit = 7384b1ec82649f271164f19af941adbd8d24bb9a
+	parent = 08b9484e9c5f844219e1e6c00fed6fe19dfa8f4f
+	method = merge
+	cmdver = 0.4.9

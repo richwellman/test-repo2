@@ -1,0 +1,63 @@
+name: Run Tests
+on:
+  pull_request:
+  push:
+    branches:
+      - 'testing'
+      - 'production'
+      - 'release'
+      - 'release-LTS'
+jobs:
+  Run-Tests:
+    if: github.repository_owner == 'vanderbilt-redcap'
+    runs-on: ubuntu-22.04
+    env:
+      MYSQL_REDCAP_CI_HOSTNAME: 127.0.0.1:8888
+      MYSQL_REDCAP_CI_DB: redcap
+      MYSQL_REDCAP_CI_USERNAME: root
+      MYSQL_REDCAP_CI_PASSWORD: password
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: false
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: redcap
+        ports:
+          - '8888:3306'
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    strategy:
+      max-parallel: 2
+      matrix:
+        php-versions: ['8.0.2', '8.3']
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-versions }}
+      - name: Checkout REDCap core
+        uses: actions/checkout@v3
+        with:
+          repository: vanderbilt-redcap/redcap
+          ref: master
+          ssh-key: ${{ secrets.REDCAP_CORE_DEPLOY_KEY }}
+          path: redcap
+      - name: Detect REDCap Version
+        run: echo "REDCAP_CI_DIR=redcap_v99.99.99" >> $GITHUB_ENV
+      - name: Install REDCap
+        run: |
+          mkdir edocs
+          mkdir temp
+          mv redcap $REDCAP_CI_DIR
+          php $REDCAP_CI_DIR/install.php
+          echo "<?php require_once __DIR__ . '/$REDCAP_CI_DIR/Config/init_global.php';" > redcap_connect.php
+      - name: Checkout the External Module Framework
+        uses: actions/checkout@v3
+        with:
+          path: external_modules
+      - name: run-tests.sh
+        run: |
+          cd external_modules
+          cp .github/workflows/database.php ../
+          php tests/init-github-action.php
+          ./run-tests.sh

@@ -1,0 +1,155 @@
+name: Deploy the Upgrade & Install Zips to GitHub Release and to REDCap
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  add-upgrade-zip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Git to use DOS format (CRLF)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol crlf
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get latest release tag and reformat its directories
+        run: |
+          git checkout ${{ github.event.release.tag_name }}
+          rm -rf .git
+          mkdir -p "redcap/redcap_v${{ github.event.release.tag_name }}" && find . -mindepth 1 -maxdepth 1 ! -name "redcap/redcap_v${{ github.event.release.tag_name }}" -exec mv {} "redcap/redcap_v${{ github.event.release.tag_name }}/" \;
+
+      - name: Create upgrade zip
+        run: |
+          cp "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/install_files/REDCap_License.txt" .
+          cp "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/install_files/Upgrade_Instructions.txt" .
+          zip -rq "redcap${{ github.event.release.tag_name }}_upgrade.zip" .
+
+      - name: Upload upgrade zip to GitHub Release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');      
+            const release_id = context.payload.release.id;
+            const upload_url = context.payload.release.upload_url.split('{')[0];            
+            const asset_name = `redcap${{ github.event.release.tag_name }}_upgrade.zip`;
+            const asset_path = path.resolve(asset_name);
+            const file_size = fs.statSync(asset_path).size;      
+            const response = await github.request({
+              method: 'POST',
+              url: `${upload_url}?name=${encodeURIComponent(asset_name)}`,
+              headers: {
+                'Content-Type': 'application/zip',
+                'Content-Length': file_size,
+              },
+              data: fs.createReadStream(asset_path),
+            });
+
+      - name: Create placeholder record for release in REDCap project
+        run: |
+          today_date=$(date +'%Y-%m-%d')
+          DATA="token=${{ secrets.REDCAP_PID50539_API_TOKEN }}&content=record&action=import&format=json&type=flat&overwriteBehavior=normal&forceAutoNumber=true&data=[{\"release_id\":\"1\",\"version_number\":\"${{ github.event.release.tag_name }}\",\"tag\":\"${{ github.event.release.tag_name }}\",\"release_date\":\"$today_date\",\"release_notes\":\"Bug fixes\",\"version_info_complete\":\"2\"}]&returnContent=ids&returnFormat=json"
+          response=$(curl -H "Content-Type: application/x-www-form-urlencoded" \
+            -H "Accept: application/json" \
+            -X POST \
+            -d "$DATA" \
+            https://redcap.vumc.org/api/)
+          record_name=$(echo "$response" | tr -cd '0-9')
+          echo "record_name=$record_name" >> $GITHUB_ENV
+          echo "Created record $record_name in the REDCap project"
+
+      - name: Set links for email
+        run: |
+          today_date=$(date +'%Y-%m-%d')
+          echo "lts_link=https://redcap.vumc.org/community/post.php?type=article&space=17&topics=software,release,lts&title=Release%20of%20REDCap%20${{ github.event.release.tag_name }}%20(LTS)&body=%3Cp%3EThe%20REDCap%20development%20team%20would%20like%20to%20announce%20a%20new%20REDCap%20release.%20Changes%20for%20this%20version%20are%20listed%20below.%3C/p%3E%20%3Ch1%3EVersion%20${{ github.event.release.tag_name }}%20(released%20on%20$today_date)%3C/h1%3E%20%3Cp%3E%3Cstrong%3ECHANGES%20IN%20THIS%20VERSION:%3C/strong%3E%3C/p%3E%20%3Cp%3E%20%3C/p%3E" >> $GITHUB_ENV
+          echo "std_link=https://redcap.vumc.org/community/post.php?type=article&space=17&topics=software,release,standard&title=Release%20of%20REDCap%20${{ github.event.release.tag_name }}%20(Standard)&body=%3Cp%3EThe%20REDCap%20development%20team%20would%20like%20to%20announce%20a%20new%20REDCap%20release.%20Changes%20for%20this%20version%20are%20listed%20below.%3C/p%3E%20%3Ch1%3EVersion%20${{ github.event.release.tag_name }}%20(released%20on%20$today_date)%3C/h1%3E%20%3Cp%3E%3Cstrong%3ECHANGES%20IN%20THIS%20VERSION:%3C/strong%3E%3C/p%3E%20%3Cp%3E%20%3C/p%3E" >> $GITHUB_ENV
+
+      - name: Upload upgrade zip to REDCap project
+        run: |
+          response=$(curl -H "Accept: application/json" \
+            -F "token=${{ secrets.REDCAP_PID50539_API_TOKEN }}" \
+            -F "content=file" \
+            -F "action=import" \
+            -F "record=${{ env.record_name }}" \
+            -F "field=upgrade_file" \
+            -F "filename=redcap${{ github.event.release.tag_name }}_upgrade.zip" \
+            -F "file=@redcap${{ github.event.release.tag_name }}_upgrade.zip" \
+            https://redcap.vumc.org/api/)
+
+      - name: Create install zip
+        run: |
+          rm "redcap${{ github.event.release.tag_name }}_upgrade.zip"
+          rm "Upgrade_Instructions.txt"
+          cp "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/install_files/Installation_Instructions.txt" .
+          cp -r "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/install_files/redcap" .          
+          mv "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/nonversioned_files" "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/redcap"
+          cp -r "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/redcap" .
+          mv "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/redcap" "redcap/redcap_v${{ github.event.release.tag_name }}/Resources/nonversioned_files"          
+          zip -rq "redcap${{ github.event.release.tag_name }}.zip" .
+
+      - name: Upload install zip to GitHub Release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');      
+            const release_id = context.payload.release.id;
+            const upload_url = context.payload.release.upload_url.split('{')[0];            
+            const asset_name = `redcap${{ github.event.release.tag_name }}.zip`;
+            const asset_path = path.resolve(asset_name);
+            const file_size = fs.statSync(asset_path).size;      
+            const response = await github.request({
+              method: 'POST',
+              url: `${upload_url}?name=${encodeURIComponent(asset_name)}`,
+              headers: {
+                'Content-Type': 'application/zip',
+                'Content-Length': file_size,
+              },
+              data: fs.createReadStream(asset_path),
+            });
+
+      - name: Upload install zip to REDCap project
+        run: |
+          response=$(curl -H "Accept: application/json" \
+            -F "token=${{ secrets.REDCAP_PID50539_API_TOKEN }}" \
+            -F "content=file" \
+            -F "action=import" \
+            -F "record=${{ env.record_name }}" \
+            -F "field=install_file" \
+            -F "filename=redcap${{ github.event.release.tag_name }}.zip" \
+            -F "file=@redcap${{ github.event.release.tag_name }}.zip" \
+            https://redcap.vumc.org/api/)
+
+      - name: Create HTML email file
+        run: |
+          echo "<html><body>
+          <p>The GitHub user <b>${{ github.actor }}</b> has created a release for 
+          <a href="${{ github.event.release.html_url }}">REDCap ${{ github.event.release.tag_name }}</a>. Follow the steps below to finalize the
+          release to make it become publicly available on REDCap Community.</p>
+          <p> </p>
+          <p><b>STEP 1:</b> <a href=\"https://redcap.vumc.org/redcap_v15.0.6/DataEntry/index.php?pid=50539&id=${{ env.record_name }}&page=version_info\">Navigate here</a> 
+          to set the value of \"Standard Release or LTS\" and \"Release Notes\", which will make the release become immediately available for download.</p>
+          <p><b>STEP 2:</b> Post the <a href="${{ github.event.release.html_url }}">release notes</a> to REDCap Community as an new <a href=\"${{ env.lts_link }}\">LTS release</a> or <a href=\"${{ env.std_link }}\">Standard release</a>.</p>
+          <p><b>STEP 3:</b> Add EACH item from the release notes to the <a href=\"${{ secrets.REDCAP_PID190089_SURVEY_URL }}\">Changelog Survey</a>.</p>
+          <p> </p>
+          <p><a href="${{ github.event.release.html_url }}">View the release notes for REDCap ${{ github.event.release.tag_name }}</a></p>
+          </body></html>" > message.html
+
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }} # This is a Gmail address
+          password: ${{ secrets.EMAIL_PASSWORD }} # This is the app password for the Google/Gmail account
+          subject: "Finalize the release of REDCap ${{ github.event.release.tag_name }}"
+          convert_markdown: true
+          html_body: file://message.html
+          to: "rob.taylor@vumc.org" # Seems not possible to retrieve the workflow initiator's email address (is often returned as NULL from the GitHub API)
+          from: ${{ secrets.EMAIL_USERNAME }}
